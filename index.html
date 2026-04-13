@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wesstyle Tactical Football ONLINE</title>
+
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+<style>
+body { 
+    background-color: #0a0a0a; color: #fff; margin: 0; 
+    display: flex; flex-direction: column; align-items: center; 
+    justify-content: flex-start; height: 100vh; font-family: 'Segoe UI', sans-serif; 
+    overflow: hidden; 
+}
+.ui { 
+    text-align: center; padding: 5px 0; width: 100%;
+    background: rgba(0,0,0,0.8); border-bottom: 1px solid #333;
+}
+.score { font-size: 24px; font-weight: bold; letter-spacing: 3px; margin: 0; }
+.controls-hint { font-size: 10px; color: #666; margin: 2px 0; }
+
+#net-ui input, #net-ui button {
+    margin:2px;
+}
+
+#game-container {
+    position: relative; width: 98vw; height: 85vh; 
+    max-width: 1280px; display: flex; justify-content: center; 
+    align-items: center; margin-top: 5px;
+}
+canvas { 
+    background-color: #0d0d0d; border: 2px solid #333;
+    width: 100%; height: 100%; object-fit: contain; cursor: crosshair;
+}
+</style>
+</head>
+
+<body>
+
+<div class="ui">
+    <p class="score" id="scoreboard">0 - 0</p>
+
+    <div id="net-ui">
+        <button onclick="createRoom()">Crear Sala</button>
+        <input id="roomIdInput" placeholder="ID">
+        <button onclick="joinRoom()">Unirse</button>
+        <span id="myId"></span>
+    </div>
+
+    <p class="controls-hint">WASD mover | SHIFT sprint | Click: pase | doble: tiro</p>
+</div>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+// =====================
+// 🌐 MULTIPLAYER
+// =====================
+let peer, conns = [];
+let isHost = false;
+let remoteInputs = {};
+let remotePlayers = {};
+
+function createRoom() {
+    peer = new Peer();
+    isHost = true;
+
+    peer.on('open', id => {
+        document.getElementById("myId").innerText = "ID: " + id;
+    });
+
+    peer.on('connection', conn => {
+        conns.push(conn);
+
+        const p = new Player(900, 300, 'visitor', true);
+        remotePlayers[conn.peer] = p;
+        players.push(p);
+
+        conn.on('data', data => {
+            if (data.type === "input") {
+                remoteInputs[conn.peer] = data;
+            }
+        });
+    });
+}
+
+function joinRoom() {
+    const id = document.getElementById("roomIdInput").value;
+    peer = new Peer();
+
+    peer.on('open', () => {
+        const conn = peer.connect(id);
+        conns = [conn];
+
+        conn.on('data', data => {
+            if (data.type === "state") applyState(data.state);
+        });
+    });
+}
+
+// =====================
+// ⚽ TU JUEGO ORIGINAL
+// =====================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const V_WIDTH = 1280;
+const V_HEIGHT = 600;
+canvas.width = V_WIDTH;
+canvas.height = V_HEIGHT;
+
+const FRICTION = 0.89;
+const BALL_FRICTION = 0.988;
+const ACCEL_WALK = 0.38;
+const ACCEL_SPRINT = 0.85; 
+const MAX_WALK = 3.8;
+const MAX_SPRINT = 7.2;
+const PITCH_MARGIN = 45;
+const PLAYER_RADIUS = 16;
+const BALL_RADIUS = 10; 
+const GOAL_Y_TOP = 230;
+const GOAL_Y_BOT = 370;
+
+let score = { local: 0, visitor: 0 };
+let mouse = { x: 0, y: 0 };
+let keys = {};
+
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+window.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - rect.left);
+    mouse.y = (e.clientY - rect.top);
+});
+
+// =====================
+// ⚽ BALL
+// =====================
+class Ball {
+    constructor() { this.reset(); }
+    reset() {
+        this.x = V_WIDTH / 2;
+        this.y = V_HEIGHT / 2;
+        this.vx = 0; this.vy = 0;
+    }
+    update() {
+        this.x += this.vx; this.y += this.vy;
+        this.vx *= BALL_FRICTION; this.vy *= BALL_FRICTION;
+    }
+    draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, BALL_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = "#fff"; ctx.fill();
+    }
+}
+
+// =====================
+// 🧍 PLAYER
+// =====================
+class Player {
+    constructor(x, y, team, isAI = false) {
+        this.x = x; this.y = y; this.team = team; this.isAI = isAI;
+        this.vx = 0; this.vy = 0; this.rot = 0;
+    }
+
+    update() {
+        if (!this.isAI && isHost) {
+            if (keys['KeyW']) this.vy -= ACCEL_WALK;
+            if (keys['KeyS']) this.vy += ACCEL_WALK;
+            if (keys['KeyA']) this.vx -= ACCEL_WALK;
+            if (keys['KeyD']) this.vx += ACCEL_WALK;
+        }
+
+        this.x += this.vx; this.y += this.vy;
+        this.vx *= FRICTION; this.vy *= FRICTION;
+    }
+
+    shoot(power, mx, my) {
+        const ang = Math.atan2(my - ball.y, mx - ball.x);
+        ball.vx = Math.cos(ang) * power;
+        ball.vy = Math.sin(ang) * power;
+    }
+
+    draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, PLAYER_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = this.team === 'local' ? '#25f' : '#f22';
+        ctx.fill();
+    }
+}
+
+const ball = new Ball();
+const player = new Player(300,300,'local');
+const players = [player];
+
+// =====================
+// 🌐 SYNC
+// =====================
+function applyState(state) {
+    ball.x = state.ball.x;
+    ball.y = state.ball.y;
+    ball.vx = state.ball.vx;
+    ball.vy = state.ball.vy;
+
+    state.players.forEach((sp, i) => {
+        if (!players[i]) return;
+        players[i].x = sp.x;
+        players[i].y = sp.y;
+        players[i].vx = sp.vx;
+        players[i].vy = sp.vy;
+    });
+}
+
+// =====================
+// 🔁 LOOP
+// =====================
+function loop() {
+
+    ctx.clearRect(0,0,V_WIDTH,V_HEIGHT);
+
+    if (isHost) {
+
+        // inputs remotos
+        for (let id in remotePlayers) {
+            const p = remotePlayers[id];
+            const input = remoteInputs[id];
+            if (!input) continue;
+
+            p.vx += input.ax;
+            p.vy += input.ay;
+
+            if (input.shoot) {
+                p.shoot(input.power, input.mx, input.my);
+            }
+        }
+
+        ball.update();
+        players.forEach(p => p.update());
+
+        // enviar estado
+        const state = {
+            ball,
+            players
+        };
+
+        conns.forEach(c => c.send({type:"state", state}));
+
+    } else {
+
+        // enviar inputs
+        const input = {
+            type:"input",
+            ax: (keys['KeyD']?0.5:0)-(keys['KeyA']?0.5:0),
+            ay: (keys['KeyS']?0.5:0)-(keys['KeyW']?0.5:0),
+            mx: mouse.x,
+            my: mouse.y,
+            shoot:false,
+            power:10
+        };
+
+        conns.forEach(c=>c.send(input));
+    }
+
+    ball.draw();
+    players.forEach(p => p.draw());
+
+    requestAnimationFrame(loop);
+}
+
+loop();
+
+// DISPARO
+canvas.addEventListener('mousedown', () => {
+    if (isHost) {
+        player.shoot(12, mouse.x, mouse.y);
+    } else {
+        conns.forEach(c => c.send({
+            type:"input",
+            shoot:true,
+            power:12,
+            mx:mouse.x,
+            my:mouse.y
+        }));
+    }
+});
+</script>
+
+</body>
+</html>
