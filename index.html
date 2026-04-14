@@ -4,156 +4,58 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wesstyle Tactical Football - Online</title>
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
-        /* Tus estilos originales se mantienen igual */
-        body { background-color: #0a0a0a; color: #fff; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; height: 100vh; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        body { background-color: #0a0a0a; color: #fff; margin: 0; display: flex; flex-direction: column; align-items: center; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
         .ui { text-align: center; padding: 5px 0; width: 100%; background: rgba(0,0,0,0.8); border-bottom: 1px solid #333; }
         .score { font-size: 24px; font-weight: bold; letter-spacing: 3px; margin: 0; }
         .stamina-bar-container { width: 150px; height: 5px; background: #222; margin: 4px auto; border-radius: 3px; overflow: hidden; }
         #stamina-fill { width: 100%; height: 100%; background: #00ff88; transition: width 0.1s linear; }
-        
-        /* Panel de Red - Estilo Wesstyle */
-        #network-panel { 
-            background: #111; padding: 10px; border: 1px solid #25f; 
-            border-radius: 8px; margin-top: 10px; display: flex; gap: 10px; align-items: center;
-        }
-        input { background: #000; border: 1px solid #333; color: #0f8; padding: 5px; border-radius: 4px; }
-        button { background: #25f; color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        button:hover { background: #1e4bd8; }
-
-        #game-container { position: relative; width: 98vw; height: 75vh; max-width: 1280px; display: flex; justify-content: center; align-items: center; margin-top: 5px; }
+        #status { font-size: 10px; color: #f0f; margin-top: 2px; }
+        #game-container { position: relative; width: 98vw; height: 85vh; max-width: 1280px; display: flex; justify-content: center; align-items: center; margin-top: 5px; }
         canvas { background-color: #0d0d0d; border: 2px solid #333; width: 100%; height: 100%; object-fit: contain; cursor: crosshair; }
     </style>
 </head>
 <body>
-
     <div class="ui">
         <p class="score" id="scoreboard">0 - 0</p>
         <div class="stamina-bar-container"><div id="stamina-fill"></div></div>
-        
-        <div id="network-panel">
-            <span>Tu ID: <b id="my-id" style="color: #25f;">...</b></span>
-            <input type="text" id="peer-id-input" placeholder="ID del Rival">
-            <button id="connect-btn">CONECTAR</button>
-            <span id="status" style="color: #666;">Esperando conexión...</span>
-        </div>
+        <div id="status">Conectando al servidor...</div>
     </div>
-
-    <div id="game-container">
-        <canvas id="gameCanvas"></canvas>
-    </div>
+    <div id="game-container"><canvas id="gameCanvas"></canvas></div>
 
 <script>
-// --- CONFIGURACIÓN DE RED (PeerJS) ---
-const peer = new Peer();
-let conn = null;
-let isHost = false;
+// --- CONFIGURACIÓN DE RED ---
+const RENDER_URL = "https://tu-juego.onrender.com"; // CAMBIA ESTO POR TU URL DE RENDER
+const socket = io(RENDER_URL);
 
-const myIdEl = document.getElementById('my-id');
-const peerIdInput = document.getElementById('peer-id-input');
-const connectBtn = document.getElementById('connect-btn');
-const statusEl = document.getElementById('status');
-
-peer.on('open', (id) => { myIdEl.innerText = id; });
-
-// Caso 1: Alguien se conecta a mí (Yo soy Host / Local)
-peer.on('connection', (c) => {
-    if (conn) return; // Solo 1v1 por ahora
-    conn = c;
-    isHost = true;
-    setupNetworkEvents();
-});
-
-// Caso 2: Yo me conecto a alguien (Yo soy Visitante)
-connectBtn.addEventListener('click', () => {
-    const remoteId = peerIdInput.value;
-    if (remoteId) {
-        conn = peer.connect(remoteId);
-        isHost = false;
-        setupNetworkEvents();
-    }
-});
-
-function setupNetworkEvents() {
-    statusEl.innerText = "¡CONECTADO!";
-    statusEl.style.color = "#0f8";
-    
-    conn.on('data', (data) => {
-        // Sincronizar al rival
-        rival.x = data.px;
-        rival.y = data.py;
-        rival.rot = data.prot;
-
-        // Si no soy el host, el host me manda la posición de la pelota
-        if (!isHost && data.ball) {
-            ball.x = data.ball.x;
-            ball.y = data.ball.y;
-        }
-        
-        // Recibir marcador
-        if (data.score) {
-            score = data.score;
-            scoreEl.innerText = `${score.local} - ${score.visitor}`;
-        }
-    });
-}
-
-// --- LÓGICA DEL JUEGO (Tu código adaptado) ---
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const scoreEl = document.getElementById('scoreboard');
 const staminaFill = document.getElementById('stamina-fill');
+const statusEl = document.getElementById('status');
 
-const V_WIDTH = 1280; const V_HEIGHT = 600;
+const V_WIDTH = 1280, V_HEIGHT = 600;
 canvas.width = V_WIDTH; canvas.height = V_HEIGHT;
 
-const FRICTION = 0.89; const BALL_FRICTION = 0.988;
-const ACCEL_WALK = 0.38; const ACCEL_SPRINT = 0.85; 
-const MAX_WALK = 3.8; const MAX_SPRINT = 7.2;
-const PITCH_MARGIN = 45; const PLAYER_RADIUS = 16; const BALL_RADIUS = 10; 
-const GOAL_Y_TOP = 230; const GOAL_Y_BOT = 370;
+// --- FÍSICAS (Tus parámetros originales) ---
+const FRICTION = 0.89, BALL_FRICTION = 0.988;
+const ACCEL_WALK = 0.38, ACCEL_SPRINT = 0.85; 
+const MAX_WALK = 3.8, MAX_SPRINT = 7.2;
+const PITCH_MARGIN = 45, PLAYER_RADIUS = 16, BALL_RADIUS = 10; 
+const GOAL_Y_TOP = 230, GOAL_Y_BOT = 370;
 
-let score = { local: 0, visitor: 0 };
-let mouse = { x: 0, y: 0 };
-let keys = {};
-let stamina = 100;
+let myId, myTeam, stamina = 100;
+let remotePlayers = {};
+let keys = {}, mouse = { x: 0, y: 0 };
 
-// Inputs y Mouse (Igual que tu código)
-window.addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Space') handleActionTrigger(); });
-window.addEventListener('keyup', e => keys[e.code] = false);
-window.addEventListener('mousemove', e => {
-    const rect = canvas.getBoundingClientRect();
-    mouse.x = (e.clientX - rect.left) * (V_WIDTH / rect.width);
-    mouse.y = (e.clientY - rect.top) * (V_HEIGHT / rect.height);
-});
-
-function handleActionTrigger() {
-    // Simplificado para el ejemplo: remate fuerte
-    player.shoot(20);
-}
-canvas.addEventListener('mousedown', handleActionTrigger);
-
-// Clases Ball y Player (Tu lógica de física, pero sin IA)
+// --- CLASES ---
 class Ball {
-    constructor() { this.reset(); }
-    reset() { this.x = V_WIDTH / 2; this.y = V_HEIGHT / 2; this.vx = 0; this.vy = 0; }
+    constructor() { this.x = V_WIDTH/2; this.y = V_HEIGHT/2; this.vx = 0; this.vy = 0; }
     update() {
-        if (!isHost && conn) return; // Solo el host calcula la física de la pelota
-
         this.x += this.vx; this.y += this.vy;
         this.vx *= BALL_FRICTION; this.vy *= BALL_FRICTION;
-
-        if (this.y - BALL_RADIUS < PITCH_MARGIN) { this.y = PITCH_MARGIN + BALL_RADIUS; this.vy *= -0.7; }
-        else if (this.y + BALL_RADIUS > V_HEIGHT - PITCH_MARGIN) { this.y = V_HEIGHT - PITCH_MARGIN - BALL_RADIUS; this.vy *= -0.7; }
-
-        if (this.x - BALL_RADIUS < PITCH_MARGIN) {
-            if (this.y > GOAL_Y_TOP && this.y < GOAL_Y_BOT) { if (this.x < PITCH_MARGIN - 5) checkGoal('visitor'); }
-            else { this.x = PITCH_MARGIN + BALL_RADIUS; this.vx *= -0.7; }
-        } else if (this.x + BALL_RADIUS > V_WIDTH - PITCH_MARGIN) {
-            if (this.y > GOAL_Y_TOP && this.y < GOAL_Y_BOT) { if (this.x > V_WIDTH - PITCH_MARGIN + 5) checkGoal('local'); }
-            else { this.x = V_WIDTH - PITCH_MARGIN - BALL_RADIUS; this.vx *= -0.7; }
-        }
+        if (this.y - BALL_RADIUS < PITCH_MARGIN || this.y + BALL_RADIUS > V_HEIGHT - PITCH_MARGIN) this.vy *= -0.7;
     }
     draw() {
         ctx.beginPath(); ctx.arc(this.x, this.y, BALL_RADIUS, 0, Math.PI * 2);
@@ -163,103 +65,97 @@ class Ball {
 
 class Player {
     constructor(x, y, team) {
-        this.x = x; this.y = y; this.team = team;
-        this.vx = 0; this.vy = 0; this.rot = 0; this.magCooldown = 0;
+        this.x = x; this.y = y; this.team = team; this.vx = 0; this.vy = 0; this.rot = 0;
     }
     update() {
-        let isSprinting = keys['ShiftLeft'] && stamina > 10;
+        let isSprinting = (keys['ShiftLeft'] || keys['ShiftRight']) && stamina > 10;
         const accel = isSprinting ? ACCEL_SPRINT : ACCEL_WALK;
         const maxS = isSprinting ? MAX_SPRINT : MAX_WALK;
 
         if (keys['KeyW']) this.vy -= accel; if (keys['KeyS']) this.vy += accel;
         if (keys['KeyA']) this.vx -= accel; if (keys['KeyD']) this.vx += accel;
 
-        if (isSprinting) stamina = Math.max(0, stamina - 1.5);
-        else stamina = Math.min(100, stamina + 0.5);
+        stamina = isSprinting ? Math.max(0, stamina - 1.5) : Math.min(100, stamina + 0.5);
         staminaFill.style.width = stamina + "%";
 
+        let s = Math.hypot(this.vx, this.vy);
+        if (s > maxS) { this.vx = (this.vx/s)*maxS; this.vy = (this.vy/s)*maxS; }
+        
         this.x += this.vx; this.y += this.vy;
         this.vx *= FRICTION; this.vy *= FRICTION;
-        this.x = Math.max(PITCH_MARGIN+PLAYER_RADIUS, Math.min(V_WIDTH-PITCH_MARGIN-PLAYER_RADIUS, this.x));
-        this.y = Math.max(PITCH_MARGIN+PLAYER_RADIUS, Math.min(V_HEIGHT-PITCH_MARGIN-PLAYER_RADIUS, this.y));
-
-        if (Math.hypot(this.vx, this.vy) > 0.2) this.rot = Math.atan2(this.vy, this.vx);
-        
-        // Magnetismo: Solo si sos el host o si el host te cede la "autoridad" de la bola
-        if (isHost) this.applyMagnetism(isSprinting);
+        this.rot = Math.atan2(mouse.y - this.y, mouse.x - this.x);
     }
-    applyMagnetism(sprinting) {
-        if (this.magCooldown > 0) { this.magCooldown--; return; }
-        const dist = Math.hypot(ball.x - this.x, ball.y - this.y);
-        if (dist < PLAYER_RADIUS + BALL_RADIUS + 10) {
-            const mDist = sprinting ? PLAYER_RADIUS + 15 : PLAYER_RADIUS + 4;
-            ball.x += (this.x + Math.cos(this.rot) * mDist - ball.x) * 0.35;
-            ball.y += (this.y + Math.sin(this.rot) * mDist - ball.y) * 0.35;
-            ball.vx = this.vx; ball.vy = this.vy;
-        }
-    }
-    shoot(power) {
-        const d = Math.hypot(ball.x - this.x, ball.y - this.y);
-        if (d < PLAYER_RADIUS + BALL_RADIUS + 35) {
-            const ang = Math.atan2(mouse.y - ball.y, mouse.x - ball.x);
-            // Si no soy host, le aviso al host que pateé
-            if (!isHost && conn) {
-                conn.send({ action: 'shoot', ang: ang, power: power });
-            } else {
-                ball.vx = Math.cos(ang) * power; ball.vy = Math.sin(ang) * power;
-                this.magCooldown = 15;
-            }
-        }
-    }
-    draw() {
+    draw(isLocal = false) {
         ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.rot);
         ctx.beginPath(); ctx.arc(0, 0, PLAYER_RADIUS, 0, Math.PI * 2);
         ctx.fillStyle = this.team === 'local' ? '#25f' : '#f22'; ctx.fill();
-        ctx.strokeStyle = "#fff"; ctx.stroke();
+        ctx.strokeStyle = isLocal ? "#fff" : "#333"; ctx.lineWidth = 3; ctx.stroke();
         ctx.restore();
     }
 }
 
 const ball = new Ball();
-const player = new Player(300, 300, 'local'); // El que manejás vos
-const rival = new Player(1000, 300, 'visitor'); // El que viene por red
-const players = [player, rival];
+const localPlayer = new Player(300, 300, 'local');
 
-function checkGoal(team) {
-    if (team === 'local') score.local++; else score.visitor++;
-    scoreEl.innerText = `${score.local} - ${score.visitor}`;
-    ball.reset();
-}
+// --- SOCKET EVENTS ---
+socket.on('init', data => {
+    myId = data.id; myTeam = data.team;
+    localPlayer.team = myTeam;
+    statusEl.innerText = "Conectado - Equipo: " + myTeam.toUpperCase();
+});
 
-function drawPitch() {
-    ctx.fillStyle = "#111"; ctx.fillRect(0, 0, V_WIDTH, V_HEIGHT);
-    ctx.strokeStyle = "#333"; ctx.lineWidth = 2;
-    ctx.strokeRect(PITCH_MARGIN, PITCH_MARGIN, V_WIDTH - PITCH_MARGIN*2, V_HEIGHT - PITCH_MARGIN*2);
-}
+socket.on('update', state => {
+    remotePlayers = state.players;
+    // Solo actualizamos la pelota si no somos nosotros los que la estamos moviendo (para evitar tirones)
+    const dist = Math.hypot(ball.x - localPlayer.x, ball.y - localPlayer.y);
+    if (dist > 50) {
+        ball.x = state.ball.x; ball.y = state.ball.y;
+    }
+});
 
+// --- LOOP PRINCIPAL ---
 function loop() {
-    drawPitch();
-    player.update();
-    ball.update();
+    ctx.fillStyle = "#111"; ctx.fillRect(0, 0, V_WIDTH, V_HEIGHT);
+    
+    if (myId) {
+        localPlayer.update();
+        ball.update();
 
-    // ENVIAR DATOS AL RIVAL
-    if (conn && conn.open) {
-        const dataToSend = {
-            px: player.x, py: player.y, prot: player.rot
-        };
-        // Si soy el host, también envío la pelota y el score
-        if (isHost) {
-            dataToSend.ball = { x: ball.x, y: ball.y };
-            dataToSend.score = score;
+        // Enviar datos al servidor
+        socket.emit('pInput', {
+            x: localPlayer.x, y: localPlayer.y, rot: localPlayer.rot,
+            ballUpdate: (Math.hypot(ball.x - localPlayer.x, ball.y - localPlayer.y) < 40) ? 
+                        { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy } : null
+        });
+
+        // Dibujar campo y pelota
+        ball.draw();
+
+        // Dibujar otros jugadores
+        for (let id in remotePlayers) {
+            if (id !== myId) {
+                const p = remotePlayers[id];
+                ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+                ctx.beginPath(); ctx.arc(0, 0, PLAYER_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = p.team === 'local' ? '#25f' : '#f22'; ctx.fill();
+                ctx.stroke(); ctx.restore();
+            }
         }
-        conn.send(dataToSend);
+        localPlayer.draw(true);
     }
 
-    ball.draw();
-    player.draw();
-    rival.draw();
     requestAnimationFrame(loop);
 }
+
+// Inputs (resumidos para el ejemplo)
+window.onkeydown = e => keys[e.code] = true;
+window.onkeyup = e => keys[e.code] = false;
+window.onmousemove = e => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - rect.left) * (V_WIDTH / rect.width);
+    mouse.y = (e.clientY - rect.top) * (V_HEIGHT / rect.height);
+};
+
 loop();
 </script>
 </body>
