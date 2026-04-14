@@ -1,294 +1,266 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Wesstyle Tactical Football ONLINE</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wesstyle Tactical Football - Online</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        /* Tus estilos originales se mantienen igual */
+        body { background-color: #0a0a0a; color: #fff; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; height: 100vh; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        .ui { text-align: center; padding: 5px 0; width: 100%; background: rgba(0,0,0,0.8); border-bottom: 1px solid #333; }
+        .score { font-size: 24px; font-weight: bold; letter-spacing: 3px; margin: 0; }
+        .stamina-bar-container { width: 150px; height: 5px; background: #222; margin: 4px auto; border-radius: 3px; overflow: hidden; }
+        #stamina-fill { width: 100%; height: 100%; background: #00ff88; transition: width 0.1s linear; }
+        
+        /* Panel de Red - Estilo Wesstyle */
+        #network-panel { 
+            background: #111; padding: 10px; border: 1px solid #25f; 
+            border-radius: 8px; margin-top: 10px; display: flex; gap: 10px; align-items: center;
+        }
+        input { background: #000; border: 1px solid #333; color: #0f8; padding: 5px; border-radius: 4px; }
+        button { background: #25f; color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #1e4bd8; }
 
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-
-<style>
-body { 
-    background-color: #0a0a0a; color: #fff; margin: 0; 
-    display: flex; flex-direction: column; align-items: center; 
-    justify-content: flex-start; height: 100vh; font-family: 'Segoe UI', sans-serif; 
-    overflow: hidden; 
-}
-.ui { 
-    text-align: center; padding: 5px 0; width: 100%;
-    background: rgba(0,0,0,0.8); border-bottom: 1px solid #333;
-}
-.score { font-size: 24px; font-weight: bold; letter-spacing: 3px; margin: 0; }
-.controls-hint { font-size: 10px; color: #666; margin: 2px 0; }
-
-#net-ui input, #net-ui button {
-    margin:2px;
-}
-
-#game-container {
-    position: relative; width: 98vw; height: 85vh; 
-    max-width: 1280px; display: flex; justify-content: center; 
-    align-items: center; margin-top: 5px;
-}
-canvas { 
-    background-color: #0d0d0d; border: 2px solid #333;
-    width: 100%; height: 100%; object-fit: contain; cursor: crosshair;
-}
-</style>
+        #game-container { position: relative; width: 98vw; height: 75vh; max-width: 1280px; display: flex; justify-content: center; align-items: center; margin-top: 5px; }
+        canvas { background-color: #0d0d0d; border: 2px solid #333; width: 100%; height: 100%; object-fit: contain; cursor: crosshair; }
+    </style>
 </head>
-
 <body>
 
-<div class="ui">
-    <p class="score" id="scoreboard">0 - 0</p>
-
-    <div id="net-ui">
-        <button onclick="createRoom()">Crear Sala</button>
-        <input id="roomIdInput" placeholder="ID">
-        <button onclick="joinRoom()">Unirse</button>
-        <span id="myId"></span>
+    <div class="ui">
+        <p class="score" id="scoreboard">0 - 0</p>
+        <div class="stamina-bar-container"><div id="stamina-fill"></div></div>
+        
+        <div id="network-panel">
+            <span>Tu ID: <b id="my-id" style="color: #25f;">...</b></span>
+            <input type="text" id="peer-id-input" placeholder="ID del Rival">
+            <button id="connect-btn">CONECTAR</button>
+            <span id="status" style="color: #666;">Esperando conexión...</span>
+        </div>
     </div>
 
-    <p class="controls-hint">WASD mover | SHIFT sprint | Click: pase | doble: tiro</p>
-</div>
-
-<div id="game-container">
-    <canvas id="gameCanvas"></canvas>
-</div>
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+    </div>
 
 <script>
-// =====================
-// 🌐 MULTIPLAYER
-// =====================
-let peer, conns = [];
+// --- CONFIGURACIÓN DE RED (PeerJS) ---
+const peer = new Peer();
+let conn = null;
 let isHost = false;
-let remoteInputs = {};
-let remotePlayers = {};
 
-function createRoom() {
-    peer = new Peer();
+const myIdEl = document.getElementById('my-id');
+const peerIdInput = document.getElementById('peer-id-input');
+const connectBtn = document.getElementById('connect-btn');
+const statusEl = document.getElementById('status');
+
+peer.on('open', (id) => { myIdEl.innerText = id; });
+
+// Caso 1: Alguien se conecta a mí (Yo soy Host / Local)
+peer.on('connection', (c) => {
+    if (conn) return; // Solo 1v1 por ahora
+    conn = c;
     isHost = true;
+    setupNetworkEvents();
+});
 
-    peer.on('open', id => {
-        document.getElementById("myId").innerText = "ID: " + id;
-    });
+// Caso 2: Yo me conecto a alguien (Yo soy Visitante)
+connectBtn.addEventListener('click', () => {
+    const remoteId = peerIdInput.value;
+    if (remoteId) {
+        conn = peer.connect(remoteId);
+        isHost = false;
+        setupNetworkEvents();
+    }
+});
 
-    peer.on('connection', conn => {
-        conns.push(conn);
+function setupNetworkEvents() {
+    statusEl.innerText = "¡CONECTADO!";
+    statusEl.style.color = "#0f8";
+    
+    conn.on('data', (data) => {
+        // Sincronizar al rival
+        rival.x = data.px;
+        rival.y = data.py;
+        rival.rot = data.prot;
 
-        const p = new Player(900, 300, 'visitor', true);
-        remotePlayers[conn.peer] = p;
-        players.push(p);
-
-        conn.on('data', data => {
-            if (data.type === "input") {
-                remoteInputs[conn.peer] = data;
-            }
-        });
+        // Si no soy el host, el host me manda la posición de la pelota
+        if (!isHost && data.ball) {
+            ball.x = data.ball.x;
+            ball.y = data.ball.y;
+        }
+        
+        // Recibir marcador
+        if (data.score) {
+            score = data.score;
+            scoreEl.innerText = `${score.local} - ${score.visitor}`;
+        }
     });
 }
 
-function joinRoom() {
-    const id = document.getElementById("roomIdInput").value;
-    peer = new Peer();
-
-    peer.on('open', () => {
-        const conn = peer.connect(id);
-        conns = [conn];
-
-        conn.on('data', data => {
-            if (data.type === "state") applyState(data.state);
-        });
-    });
-}
-
-// =====================
-// ⚽ TU JUEGO ORIGINAL
-// =====================
+// --- LÓGICA DEL JUEGO (Tu código adaptado) ---
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('scoreboard');
+const staminaFill = document.getElementById('stamina-fill');
 
-const V_WIDTH = 1280;
-const V_HEIGHT = 600;
-canvas.width = V_WIDTH;
-canvas.height = V_HEIGHT;
+const V_WIDTH = 1280; const V_HEIGHT = 600;
+canvas.width = V_WIDTH; canvas.height = V_HEIGHT;
 
-const FRICTION = 0.89;
-const BALL_FRICTION = 0.988;
-const ACCEL_WALK = 0.38;
-const ACCEL_SPRINT = 0.85; 
-const MAX_WALK = 3.8;
-const MAX_SPRINT = 7.2;
-const PITCH_MARGIN = 45;
-const PLAYER_RADIUS = 16;
-const BALL_RADIUS = 10; 
-const GOAL_Y_TOP = 230;
-const GOAL_Y_BOT = 370;
+const FRICTION = 0.89; const BALL_FRICTION = 0.988;
+const ACCEL_WALK = 0.38; const ACCEL_SPRINT = 0.85; 
+const MAX_WALK = 3.8; const MAX_SPRINT = 7.2;
+const PITCH_MARGIN = 45; const PLAYER_RADIUS = 16; const BALL_RADIUS = 10; 
+const GOAL_Y_TOP = 230; const GOAL_Y_BOT = 370;
 
 let score = { local: 0, visitor: 0 };
 let mouse = { x: 0, y: 0 };
 let keys = {};
+let stamina = 100;
 
-window.addEventListener('keydown', e => keys[e.code] = true);
+// Inputs y Mouse (Igual que tu código)
+window.addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Space') handleActionTrigger(); });
 window.addEventListener('keyup', e => keys[e.code] = false);
-
 window.addEventListener('mousemove', e => {
     const rect = canvas.getBoundingClientRect();
-    mouse.x = (e.clientX - rect.left);
-    mouse.y = (e.clientY - rect.top);
+    mouse.x = (e.clientX - rect.left) * (V_WIDTH / rect.width);
+    mouse.y = (e.clientY - rect.top) * (V_HEIGHT / rect.height);
 });
 
-// =====================
-// ⚽ BALL
-// =====================
+function handleActionTrigger() {
+    // Simplificado para el ejemplo: remate fuerte
+    player.shoot(20);
+}
+canvas.addEventListener('mousedown', handleActionTrigger);
+
+// Clases Ball y Player (Tu lógica de física, pero sin IA)
 class Ball {
     constructor() { this.reset(); }
-    reset() {
-        this.x = V_WIDTH / 2;
-        this.y = V_HEIGHT / 2;
-        this.vx = 0; this.vy = 0;
-    }
+    reset() { this.x = V_WIDTH / 2; this.y = V_HEIGHT / 2; this.vx = 0; this.vy = 0; }
     update() {
+        if (!isHost && conn) return; // Solo el host calcula la física de la pelota
+
         this.x += this.vx; this.y += this.vy;
         this.vx *= BALL_FRICTION; this.vy *= BALL_FRICTION;
+
+        if (this.y - BALL_RADIUS < PITCH_MARGIN) { this.y = PITCH_MARGIN + BALL_RADIUS; this.vy *= -0.7; }
+        else if (this.y + BALL_RADIUS > V_HEIGHT - PITCH_MARGIN) { this.y = V_HEIGHT - PITCH_MARGIN - BALL_RADIUS; this.vy *= -0.7; }
+
+        if (this.x - BALL_RADIUS < PITCH_MARGIN) {
+            if (this.y > GOAL_Y_TOP && this.y < GOAL_Y_BOT) { if (this.x < PITCH_MARGIN - 5) checkGoal('visitor'); }
+            else { this.x = PITCH_MARGIN + BALL_RADIUS; this.vx *= -0.7; }
+        } else if (this.x + BALL_RADIUS > V_WIDTH - PITCH_MARGIN) {
+            if (this.y > GOAL_Y_TOP && this.y < GOAL_Y_BOT) { if (this.x > V_WIDTH - PITCH_MARGIN + 5) checkGoal('local'); }
+            else { this.x = V_WIDTH - PITCH_MARGIN - BALL_RADIUS; this.vx *= -0.7; }
+        }
     }
     draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, BALL_RADIUS, 0, Math.PI * 2);
-        ctx.fillStyle = "#fff"; ctx.fill();
+        ctx.beginPath(); ctx.arc(this.x, this.y, BALL_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = "#fff"; ctx.fill(); ctx.stroke();
     }
 }
 
-// =====================
-// 🧍 PLAYER
-// =====================
 class Player {
-    constructor(x, y, team, isAI = false) {
-        this.x = x; this.y = y; this.team = team; this.isAI = isAI;
-        this.vx = 0; this.vy = 0; this.rot = 0;
+    constructor(x, y, team) {
+        this.x = x; this.y = y; this.team = team;
+        this.vx = 0; this.vy = 0; this.rot = 0; this.magCooldown = 0;
     }
-
     update() {
-        if (!this.isAI && isHost) {
-            if (keys['KeyW']) this.vy -= ACCEL_WALK;
-            if (keys['KeyS']) this.vy += ACCEL_WALK;
-            if (keys['KeyA']) this.vx -= ACCEL_WALK;
-            if (keys['KeyD']) this.vx += ACCEL_WALK;
-        }
+        let isSprinting = keys['ShiftLeft'] && stamina > 10;
+        const accel = isSprinting ? ACCEL_SPRINT : ACCEL_WALK;
+        const maxS = isSprinting ? MAX_SPRINT : MAX_WALK;
+
+        if (keys['KeyW']) this.vy -= accel; if (keys['KeyS']) this.vy += accel;
+        if (keys['KeyA']) this.vx -= accel; if (keys['KeyD']) this.vx += accel;
+
+        if (isSprinting) stamina = Math.max(0, stamina - 1.5);
+        else stamina = Math.min(100, stamina + 0.5);
+        staminaFill.style.width = stamina + "%";
 
         this.x += this.vx; this.y += this.vy;
         this.vx *= FRICTION; this.vy *= FRICTION;
-    }
+        this.x = Math.max(PITCH_MARGIN+PLAYER_RADIUS, Math.min(V_WIDTH-PITCH_MARGIN-PLAYER_RADIUS, this.x));
+        this.y = Math.max(PITCH_MARGIN+PLAYER_RADIUS, Math.min(V_HEIGHT-PITCH_MARGIN-PLAYER_RADIUS, this.y));
 
-    shoot(power, mx, my) {
-        const ang = Math.atan2(my - ball.y, mx - ball.x);
-        ball.vx = Math.cos(ang) * power;
-        ball.vy = Math.sin(ang) * power;
+        if (Math.hypot(this.vx, this.vy) > 0.2) this.rot = Math.atan2(this.vy, this.vx);
+        
+        // Magnetismo: Solo si sos el host o si el host te cede la "autoridad" de la bola
+        if (isHost) this.applyMagnetism(isSprinting);
     }
-
+    applyMagnetism(sprinting) {
+        if (this.magCooldown > 0) { this.magCooldown--; return; }
+        const dist = Math.hypot(ball.x - this.x, ball.y - this.y);
+        if (dist < PLAYER_RADIUS + BALL_RADIUS + 10) {
+            const mDist = sprinting ? PLAYER_RADIUS + 15 : PLAYER_RADIUS + 4;
+            ball.x += (this.x + Math.cos(this.rot) * mDist - ball.x) * 0.35;
+            ball.y += (this.y + Math.sin(this.rot) * mDist - ball.y) * 0.35;
+            ball.vx = this.vx; ball.vy = this.vy;
+        }
+    }
+    shoot(power) {
+        const d = Math.hypot(ball.x - this.x, ball.y - this.y);
+        if (d < PLAYER_RADIUS + BALL_RADIUS + 35) {
+            const ang = Math.atan2(mouse.y - ball.y, mouse.x - ball.x);
+            // Si no soy host, le aviso al host que pateé
+            if (!isHost && conn) {
+                conn.send({ action: 'shoot', ang: ang, power: power });
+            } else {
+                ball.vx = Math.cos(ang) * power; ball.vy = Math.sin(ang) * power;
+                this.magCooldown = 15;
+            }
+        }
+    }
     draw() {
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, PLAYER_RADIUS, 0, Math.PI * 2);
-        ctx.fillStyle = this.team === 'local' ? '#25f' : '#f22';
-        ctx.fill();
+        ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.rot);
+        ctx.beginPath(); ctx.arc(0, 0, PLAYER_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = this.team === 'local' ? '#25f' : '#f22'; ctx.fill();
+        ctx.strokeStyle = "#fff"; ctx.stroke();
+        ctx.restore();
     }
 }
 
 const ball = new Ball();
-const player = new Player(300,300,'local');
-const players = [player];
+const player = new Player(300, 300, 'local'); // El que manejás vos
+const rival = new Player(1000, 300, 'visitor'); // El que viene por red
+const players = [player, rival];
 
-// =====================
-// 🌐 SYNC
-// =====================
-function applyState(state) {
-    ball.x = state.ball.x;
-    ball.y = state.ball.y;
-    ball.vx = state.ball.vx;
-    ball.vy = state.ball.vy;
-
-    state.players.forEach((sp, i) => {
-        if (!players[i]) return;
-        players[i].x = sp.x;
-        players[i].y = sp.y;
-        players[i].vx = sp.vx;
-        players[i].vy = sp.vy;
-    });
+function checkGoal(team) {
+    if (team === 'local') score.local++; else score.visitor++;
+    scoreEl.innerText = `${score.local} - ${score.visitor}`;
+    ball.reset();
 }
 
-// =====================
-// 🔁 LOOP
-// =====================
+function drawPitch() {
+    ctx.fillStyle = "#111"; ctx.fillRect(0, 0, V_WIDTH, V_HEIGHT);
+    ctx.strokeStyle = "#333"; ctx.lineWidth = 2;
+    ctx.strokeRect(PITCH_MARGIN, PITCH_MARGIN, V_WIDTH - PITCH_MARGIN*2, V_HEIGHT - PITCH_MARGIN*2);
+}
+
 function loop() {
+    drawPitch();
+    player.update();
+    ball.update();
 
-    ctx.clearRect(0,0,V_WIDTH,V_HEIGHT);
-
-    if (isHost) {
-
-        // inputs remotos
-        for (let id in remotePlayers) {
-            const p = remotePlayers[id];
-            const input = remoteInputs[id];
-            if (!input) continue;
-
-            p.vx += input.ax;
-            p.vy += input.ay;
-
-            if (input.shoot) {
-                p.shoot(input.power, input.mx, input.my);
-            }
+    // ENVIAR DATOS AL RIVAL
+    if (conn && conn.open) {
+        const dataToSend = {
+            px: player.x, py: player.y, prot: player.rot
+        };
+        // Si soy el host, también envío la pelota y el score
+        if (isHost) {
+            dataToSend.ball = { x: ball.x, y: ball.y };
+            dataToSend.score = score;
         }
-
-        ball.update();
-        players.forEach(p => p.update());
-
-        // enviar estado
-        const state = {
-            ball,
-            players
-        };
-
-        conns.forEach(c => c.send({type:"state", state}));
-
-    } else {
-
-        // enviar inputs
-        const input = {
-            type:"input",
-            ax: (keys['KeyD']?0.5:0)-(keys['KeyA']?0.5:0),
-            ay: (keys['KeyS']?0.5:0)-(keys['KeyW']?0.5:0),
-            mx: mouse.x,
-            my: mouse.y,
-            shoot:false,
-            power:10
-        };
-
-        conns.forEach(c=>c.send(input));
+        conn.send(dataToSend);
     }
 
     ball.draw();
-    players.forEach(p => p.draw());
-
+    player.draw();
+    rival.draw();
     requestAnimationFrame(loop);
 }
-
 loop();
-
-// DISPARO
-canvas.addEventListener('mousedown', () => {
-    if (isHost) {
-        player.shoot(12, mouse.x, mouse.y);
-    } else {
-        conns.forEach(c => c.send({
-            type:"input",
-            shoot:true,
-            power:12,
-            mx:mouse.x,
-            my:mouse.y
-        }));
-    }
-});
 </script>
-
 </body>
 </html>
